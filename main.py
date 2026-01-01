@@ -4,7 +4,7 @@ import asyncio
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QWidget, 
                              QLabel, QPushButton, QHBoxLayout, QTextEdit, 
                              QTableView, QHeaderView, QAbstractItemView, 
-                             QMessageBox, QSplitter)
+                             QMessageBox, QSplitter, QComboBox)
 from PyQt6.QtCore import Qt, pyqtSlot, QAbstractTableModel, QVariant
 from qasync import QEventLoop, asyncSlot
 
@@ -13,6 +13,7 @@ import models_logic
 import network
 from hf_space_chat import GLMChatWindow
 from md_viewer import MarkdownViewer
+from models_manager import ModelsManager
 
 # Настройка логирования
 logging.basicConfig(
@@ -114,8 +115,16 @@ class MainWindow(QMainWindow):
         """)
         btn_special.clicked.connect(self.open_special_chat)
         
+        btn_models = QPushButton("⚙️ Manage Models")
+        btn_models.setStyleSheet("""
+            QPushButton { background-color: #34495e; border: 1px solid #5d6d7e; color: #ecf0f1; padding: 8px 16px; border-radius: 4px; margin-right: 5px; }
+            QPushButton:hover { background-color: #5d6d7e; }
+        """)
+        btn_models.clicked.connect(self.open_models_manager)
+
         header_layout.addWidget(title_label)
         header_layout.addStretch()
+        header_layout.addWidget(btn_models)
         header_layout.addWidget(btn_special)
         main_layout.addLayout(header_layout)
 
@@ -128,6 +137,23 @@ class MainWindow(QMainWindow):
         
         prompt_label = QLabel("Enter your prompt:")
         prompt_label.setStyleSheet("font-weight: bold; color: #888;")
+        
+        # История промтов
+        history_layout = QHBoxLayout()
+        history_label = QLabel("History:")
+        history_label.setStyleSheet("color: #555; font-size: 11px;")
+        self.prompt_history = QComboBox()
+        self.prompt_history.setStyleSheet("""
+            QComboBox { background-color: #252525; color: #aaa; border: 1px solid #333; padding: 3px; }
+            QComboBox QAbstractItemView { background-color: #252525; color: #aaa; }
+        """)
+        self.prompt_history.addItem("-- Select from history --")
+        self.prompt_history.currentIndexChanged.connect(self.on_history_selected)
+        
+        history_layout.addWidget(history_label)
+        history_layout.addWidget(self.prompt_history)
+        history_layout.addStretch()
+
         self.prompt_input = QTextEdit()
         self.prompt_input.setPlaceholderText("Paste your request here...")
         self.prompt_input.setStyleSheet("background-color: #1e1e1e; border: 1px solid #333; padding: 10px; font-size: 14px;")
@@ -142,6 +168,7 @@ class MainWindow(QMainWindow):
         self.btn_send.clicked.connect(self.on_send_clicked)
 
         input_layout.addWidget(prompt_label)
+        input_layout.addLayout(history_layout)
         input_layout.addWidget(self.prompt_input)
         input_layout.addWidget(btn_send)
         
@@ -196,11 +223,18 @@ class MainWindow(QMainWindow):
         
         main_layout.addWidget(splitter)
         self.setCentralWidget(central_widget)
+        
+        # Загружаем историю при старте
+        self.load_history()
 
     def open_special_chat(self):
         if self.special_chat_window is None:
             self.special_chat_window = GLMChatWindow()
         self.special_chat_window.show()
+
+    def open_models_manager(self):
+        manager = ModelsManager(parent=self)
+        manager.exec()
 
     @asyncSlot()
     async def on_send_clicked(self):
@@ -243,6 +277,29 @@ class MainWindow(QMainWindow):
             db.save_result(prompt_id, item['model'], item['response'])
             
         QMessageBox.information(self, "Success", f"Saved {len(selected_data)} responses to history.")
+        self.load_history() # Обновляем выпадающий список
+
+    def load_history(self):
+        """Загрузка истории из БД в выпадающий список."""
+        try:
+            prompts = db.get_prompts()
+            self.prompt_history.blockSignals(True)
+            self.prompt_history.clear()
+            self.prompt_history.addItem("-- Select from history --")
+            for p in prompts:
+                # Показываем только первые 50 символов в списке
+                short_text = (p[2][:50] + '...') if len(p[2]) > 50 else p[2]
+                self.prompt_history.addItem(f"{p[1][:10]} | {short_text}", p[2])
+            self.prompt_history.blockSignals(False)
+        except Exception as e:
+            logger.error(f"Error loading history: {e}")
+
+    def on_history_selected(self, index):
+        """Вставка текста из истории в текстовое поле."""
+        if index > 0:
+            full_text = self.prompt_history.itemData(index)
+            if full_text:
+                self.prompt_input.setPlainText(full_text)
 
     def open_md_viewer(self):
         """Открывает Markdown viewer для первой выбранной строки."""
