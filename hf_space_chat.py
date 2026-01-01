@@ -65,8 +65,8 @@ class GLMChatWindow(QWidget):
         self.cb_thinking.setStyleSheet("QCheckBox { color: #8888ff; font-weight: bold; font-size: 16px; border: none; }")
         
         thinking_desc = QLabel(
-            "Enabled: Activates the model's thinking capability. The model will decide whether to think based on the situation.\n"
-            "Disabled: Disables the model's thinking capability. The model will answer questions directly without reasoning."
+            "Enabled: Activates the model's thinking capability.\n"
+            "Disabled: Disables the model's thinking capability."
         )
         thinking_desc.setWordWrap(True)
         thinking_desc.setStyleSheet("color: #ff4444; font-size: 11px; border: none; margin-top: 5px;")

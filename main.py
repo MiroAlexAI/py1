@@ -12,6 +12,7 @@ import db
 import models_logic
 import network
 from hf_space_chat import GLMChatWindow
+from md_viewer import MarkdownViewer
 
 # Настройка логирования
 logging.basicConfig(
@@ -28,7 +29,7 @@ class ResultsTableModel(QAbstractTableModel):
     def __init__(self, data=None):
         super().__init__()
         self._data = data or []
-        self._headers = ["Select", "Model", "Response", "Status"]
+        self._headers = ["Select", "Model", "Response", "Status", "Preview"]
 
     def rowCount(self, parent=None):
         return len(self._data)
@@ -47,6 +48,7 @@ class ResultsTableModel(QAbstractTableModel):
             if col == 1: return self._data[row]['model']
             if col == 2: return self._data[row]['response']
             if col == 3: return self._data[row]['status']
+            if col == 4: return "🔍 Open"
         
         if role == Qt.ItemDataRole.CheckStateRole and col == 0:
             return Qt.CheckState.Checked if self._data[row].get('selected') else Qt.CheckState.Unchecked
@@ -158,7 +160,12 @@ class MainWindow(QMainWindow):
         """)
         self.results_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.results_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.results_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
+        self.results_table.setColumnWidth(4, 80)
+        self.results_table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        self.results_table.setWordWrap(True)
         self.results_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.results_table.doubleClicked.connect(self.on_table_double_clicked)
         
         # Action Buttons for Results
         actions_layout = QHBoxLayout()
@@ -169,7 +176,12 @@ class MainWindow(QMainWindow):
         btn_export = QPushButton("Export to Markdown")
         btn_export.setStyleSheet("background-color: #6c757d; color: white; padding: 8px 16px; border-radius: 4px;")
         
+        btn_open = QPushButton("🔍 Open in MD")
+        btn_open.setStyleSheet("background-color: #0078d4; color: white; padding: 8px 16px; border-radius: 4px;")
+        btn_open.clicked.connect(self.open_md_viewer)
+        
         actions_layout.addWidget(btn_save)
+        actions_layout.addWidget(btn_open)
         actions_layout.addWidget(btn_export)
         actions_layout.addStretch()
 
@@ -207,6 +219,7 @@ class MainWindow(QMainWindow):
         try:
             results = await network.send_parallel_prompts(active_models, prompt)
             self.results_model.update_data(results)
+            self.results_table.resizeRowsToContents()
         except Exception as e:
             logger.error(f"Error during parallel send: {e}")
             QMessageBox.critical(self, "Error", str(e))
@@ -230,6 +243,29 @@ class MainWindow(QMainWindow):
             db.save_result(prompt_id, item['model'], item['response'])
             
         QMessageBox.information(self, "Success", f"Saved {len(selected_data)} responses to history.")
+
+    def open_md_viewer(self):
+        """Открывает Markdown viewer для первой выбранной строки."""
+        selected_indexes = self.results_table.selectionModel().selectedRows()
+        if not selected_indexes:
+            # Если ничего не выделено курсором, ищем по чекбоксам
+            selected_rows = [row for row in self.results_model._data if row.get('selected')]
+            if not selected_rows:
+                QMessageBox.information(self, "Preview", "Please select a row to open.")
+                return
+            row_data = selected_rows[0]
+        else:
+            row_index = selected_indexes[0].row()
+            row_data = self.results_model._data[row_index]
+        
+        viewer = MarkdownViewer(row_data['model'], row_data['response'], self)
+        viewer.exec()
+
+    def on_table_double_clicked(self, index):
+        """Открытие по двойному клику."""
+        row_data = self.results_model._data[index.row()]
+        viewer = MarkdownViewer(row_data['model'], row_data['response'], self)
+        viewer.exec()
 
 def main():
     app = QApplication(sys.argv)
