@@ -110,7 +110,7 @@ class ResultsTableModel(QAbstractTableModel):
     def __init__(self, data=None):
         super().__init__()
         self._data = data or []
-        self._headers = ["Select", "Slot", "Model", "Response", "Status", "Preview"]
+        self._headers = ["Select", "Slot", "Model", "Response", "Symbols", "Status", "Preview"]
 
     def rowCount(self, parent=None):
         return len(self._data)
@@ -128,9 +128,16 @@ class ResultsTableModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.DisplayRole:
             if col == 1: return self._data[row].get('slot', 'P1')
             if col == 2: return self._data[row]['model']
-            if col == 3: return self._data[row]['response']
-            if col == 4: return self._data[row]['status']
-            if col == 5: return "🔍 Open"
+            if col == 3: 
+                resp = self._data[row]['response']
+                # Сокращаем вывод, чтобы таблица не была слишком высокой
+                lines = resp.split('\n')
+                if len(lines) > 3:
+                    return "\n".join(lines[:3]) + "..."
+                return (resp[:200] + '...') if len(resp) > 200 else resp
+            if col == 4: return str(len(self._data[row]['response']))
+            if col == 5: return self._data[row]['status']
+            if col == 6: return "🔍 Open"
         
         if role == Qt.ItemDataRole.CheckStateRole and col == 0:
             return Qt.CheckState.Checked if self._data[row].get('selected') else Qt.CheckState.Unchecked
@@ -152,7 +159,7 @@ class ResultsTableModel(QAbstractTableModel):
             self.dataChanged.emit(index, index, [role])
             return True
         
-        if role == Qt.ItemDataRole.EditRole and col == 2:
+        if role == Qt.ItemDataRole.EditRole and col == 3:
             self._data[row]['response'] = value
             self.dataChanged.emit(index, index, [Qt.ItemDataRole.DisplayRole])
             return True
@@ -175,7 +182,8 @@ class ResultsTableModel(QAbstractTableModel):
         self.beginResetModel()
         self._data = new_data
         for item in self._data:
-            item['selected'] = False
+            if 'selected' not in item:
+                item['selected'] = False
         self.endResetModel()
 
 class MainWindow(QMainWindow):
@@ -291,6 +299,13 @@ class MainWindow(QMainWindow):
         btn_send.setObjectName("send_btn")
         self.btn_send = btn_send
         self.btn_send.clicked.connect(self.on_send_clicked)
+        
+        btn_preview = QPushButton("🔍 Preview Prompt")
+        btn_preview.clicked.connect(self.on_preview_prompt_clicked)
+        
+        btn_row_layout = QHBoxLayout()
+        btn_row_layout.addWidget(btn_send, 4)
+        btn_row_layout.addWidget(btn_preview, 1)
 
         input_layout.addWidget(prompt_label)
         input_layout.addLayout(history_layout)
@@ -304,7 +319,7 @@ class MainWindow(QMainWindow):
         """)
         input_layout.addWidget(self.progress_bar)
         
-        input_layout.addWidget(btn_send)
+        input_layout.addLayout(btn_row_layout)
         
         # Bottom Widget: Results Table
         results_widget = QWidget()
@@ -312,28 +327,29 @@ class MainWindow(QMainWindow):
         
         # Search and Info
         table_header_layout = QHBoxLayout()
-        table_label = QLabel("Model Responses Comparison:")
-        table_label.setStyleSheet("font-weight: bold; color: #888;")
+        self.table_info_label = QLabel("Model Responses Comparison:")
+        self.table_info_label.setStyleSheet("font-weight: bold; color: #888;")
         
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("🔍 Search in results...")
         self.search_input.setMaximumWidth(300)
         self.search_input.textChanged.connect(self.proxy_model.setFilterFixedString)
         
-        table_header_layout.addWidget(table_label)
+        table_header_layout.addWidget(self.table_info_label)
         table_header_layout.addStretch()
         table_header_layout.addWidget(self.search_input)
-        table_label.setStyleSheet("font-weight: bold; color: #888;")
         
         self.results_table = QTableView()
         self.results_table.setModel(self.proxy_model)
         self.results_table.setSortingEnabled(True)
         self.results_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        self.results_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        self.results_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
-        self.results_table.setColumnWidth(0, 50)
-        self.results_table.setColumnWidth(1, 150)
-        self.results_table.setColumnWidth(4, 80)
+        self.results_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch) # Response stretch
+        self.results_table.setColumnWidth(0, 40)  # Select
+        self.results_table.setColumnWidth(1, 80)  # Slot
+        self.results_table.setColumnWidth(2, 160) # Model (narrower)
+        self.results_table.setColumnWidth(4, 70)  # Symbols
+        self.results_table.setColumnWidth(5, 80)  # Status
+        self.results_table.setColumnWidth(6, 80)  # Preview
         self.results_table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         self.results_table.setWordWrap(True)
         self.results_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -355,8 +371,13 @@ class MainWindow(QMainWindow):
         btn_open.setStyleSheet("background-color: #2563eb; color: white;")
         btn_open.clicked.connect(self.open_md_viewer)
         
+        btn_retry = QPushButton("🔄 Retry Errors")
+        btn_retry.clicked.connect(self.on_retry_errors_clicked)
+        self.btn_retry = btn_retry
+        
         actions_layout.addWidget(btn_save)
         actions_layout.addWidget(btn_open)
+        actions_layout.addWidget(btn_retry)
         actions_layout.addWidget(btn_export_md)
         actions_layout.addWidget(btn_export_json)
         actions_layout.addStretch()
@@ -421,19 +442,25 @@ class MainWindow(QMainWindow):
             delay_step = float(db.get_setting("request_delay", 0.0))
             timeout = float(db.get_setting("request_timeout", 60.0))
             
-            tasks = [network.delayed_fetch(i * delay_step, m[0], m[1], m[2], combined_prompt, timeout) 
-                     for i, m in enumerate(active_models)]
-            
-            for future in asyncio.as_completed(tasks):
-                res = await future
+            async def wrap_task(task, model_info):
+                res = await task
+                res['api_url'] = model_info[1]
+                res['api_key_name'] = model_info[2]
                 res['slot'] = "P1+P2+P3" 
-                # Сохраняем компоненты в объекте результата для корректного сохранения в разные таблицы истории
                 res['p1'] = p1
                 res['p2'] = p2
                 res['p3'] = p3
+                return res
+
+            wrapped_tasks = [wrap_task(network.delayed_fetch(i * delay_step, m[0], m[1], m[2], combined_prompt, timeout), m) 
+                             for i, m in enumerate(active_models)]
+            
+            for future in asyncio.as_completed(wrapped_tasks):
+                res = await future
                 all_results.append(res)
                 completed += 1
                 self.progress_bar.setValue(completed)
+                self.table_info_label.setText(f"Model Responses Comparison (Completed: {completed}/{len(active_models)})")
                 self.results_model.update_data(all_results.copy())
                 self.results_table.resizeRowsToContents()
                 
@@ -518,6 +545,87 @@ class MainWindow(QMainWindow):
             db.delete_prompt(prompt_id, table=p_table)
             self.load_history()
 
+    def on_preview_prompt_clicked(self):
+        """Показ объединенного промпта перед отправкой."""
+        p1 = self.p1_input.toPlainText().strip()
+        p2 = self.p2_input.toPlainText().strip()
+        p3 = self.p3_input.toPlainText().strip()
+        
+        combined = "\n\n".join([p for p in [p1, p2, p3] if p])
+        if not combined:
+            QMessageBox.information(self, "Preview", "Prompt is empty.")
+            return
+            
+        viewer = MarkdownViewer("Prompt Preview", f"```text\n{combined}\n```", self)
+        viewer.exec()
+
+    @asyncSlot()
+    async def on_retry_errors_clicked(self):
+        """Повторный запрос для тех моделей, которые вернули ошибку."""
+        data = self.results_model._data
+        failed_indices = [i for i, item in enumerate(data) if item.get('status', '').startswith("Error")]
+        
+        if not failed_indices:
+            QMessageBox.information(self, "Retry", "No errors found to retry.")
+            return
+
+        p1 = self.p1_input.toPlainText().strip()
+        p2 = self.p2_input.toPlainText().strip()
+        p3 = self.p3_input.toPlainText().strip()
+        combined_prompt = "\n\n".join([p for p in [p1, p2, p3] if p])
+
+        if not combined_prompt:
+            QMessageBox.warning(self, "Retry", "Prompt is empty. Cannot retry.")
+            return
+
+        self.btn_retry.setEnabled(False)
+        self.btn_retry.setText("Retrying...")
+        
+        try:
+            delay_step = float(db.get_setting("request_delay", 0.0))
+            timeout = float(db.get_setting("request_timeout", 60.0))
+            
+            async def run_retry(idx, delay):
+                item = data[idx]
+                model_name = item['model']
+                api_url = item.get('api_url')
+                api_key_name = item.get('api_key_name')
+                
+                if not api_url or not api_key_name:
+                    active_models = models_logic.get_active_models_with_keys()
+                    found = False
+                    for m in active_models:
+                        if m[0] == model_name:
+                            api_url, api_key_name = m[1], m[2]
+                            found = True
+                            break
+                    if not found:
+                        item['status'] = "Error: Model info missing"
+                        return
+
+                res = await network.delayed_fetch(delay, model_name, api_url, api_key_name, combined_prompt, timeout)
+                item['response'] = res['response']
+                item['status'] = res['status']
+                item['api_url'] = api_url 
+                item['api_key_name'] = api_key_name
+
+            tasks = [run_retry(idx, i * delay_step) for i, idx in enumerate(failed_indices)]
+            await asyncio.gather(*tasks)
+
+            # Обновляем таблицу атомарно
+            self.results_model.beginResetModel()
+            # Данные уже изменены внутри run_retry, так как item — ссылка на объект в списке
+            self.results_model.endResetModel()
+            self.results_table.resizeRowsToContents()
+            QMessageBox.information(self, "Retry", f"Retry completed for {len(failed_indices)} items.")
+            
+        except Exception as e:
+            logger.error(f"Retry error: {e}")
+            QMessageBox.critical(self, "Error", f"Retry failed: {e}")
+        finally:
+            self.btn_retry.setEnabled(True)
+            self.btn_retry.setText("🔄 Retry Errors")
+
     def load_history(self):
         """Загрузка истории для текущей активной вкладки промпта."""
         try:
@@ -578,12 +686,13 @@ class MainWindow(QMainWindow):
             # Экспортируем полное объединение
             prompt = "\n\n".join([i.toPlainText().strip() for i in inputs if i.toPlainText().strip()])
             md_content = f"# ChatList Export (Triple Combined)\n\n**Full Prompt:**\n{prompt}\n\n"
-            md_content += "| Model | Response | Status |\n"
-            md_content += "|-------|----------|--------|\n"
+            md_content += "| Model | Response | Symbols | Status |\n"
+            md_content += "|-------|----------|---------|--------|\n"
             
             for row in data:
                 resp = row['response'].replace('\n', '<br>')
-                md_content += f"| {row['model']} | {resp} | {row['status']} |\n"
+                sym_count = len(row['response'])
+                md_content += f"| {row['model']} | {resp} | {sym_count} | {row['status']} |\n"
             
             with open(file_path, "w", encoding="utf-8") as f:
                 f.write(md_content)
@@ -603,9 +712,13 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            prompt = self.prompt_input.toPlainText().strip()
+            p1 = self.p1_input.toPlainText().strip()
+            p2 = self.p2_input.toPlainText().strip()
+            p3 = self.p3_input.toPlainText().strip()
+            combined_prompt = "\n\n".join([p for p in [p1, p2, p3] if p])
+            
             export_obj = {
-                "prompt": prompt,
+                "prompt": combined_prompt,
                 "timestamp": db.datetime.now().isoformat(),
                 "results": data
             }
