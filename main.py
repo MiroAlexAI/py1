@@ -11,6 +11,7 @@ from PyQt6.QtGui import QFont
 from qasync import QEventLoop, asyncSlot
 import json
 
+from notes_manager import NotesManager
 import db
 import models_logic
 import network
@@ -237,8 +238,13 @@ class MainWindow(QMainWindow):
         btn_journal = QPushButton("📜 Results Journal")
         btn_journal.clicked.connect(self.open_results_journal)
 
+        btn_notes = QPushButton("📝 Notes / Drafts")
+        btn_notes.clicked.connect(self.open_notes_manager)
+        btn_notes.setStyleSheet("background-color: #4b5563; color: white;")
+
         header_layout.addWidget(title_label)
         header_layout.addStretch()
+        header_layout.addWidget(btn_notes)
         header_layout.addWidget(btn_journal)
         header_layout.addWidget(btn_models)
         header_layout.addWidget(btn_special)
@@ -266,7 +272,7 @@ class MainWindow(QMainWindow):
         self.prompt_history.activated.connect(self.on_history_selected)
         
         btn_save_prompt = QPushButton("💾 Save Prompt")
-        btn_save_prompt.setStyleSheet("background-color: #1e293b; padding: 4px 12px; font-size: 12px;")
+        btn_save_prompt.setStyleSheet("color: #3b82f6; padding: 4px 12px; font-size: 12px;")
         btn_save_prompt.clicked.connect(self.on_save_prompt_clicked)
         
         btn_delete_prompt = QPushButton("🗑️")
@@ -409,6 +415,10 @@ class MainWindow(QMainWindow):
     def open_results_journal(self):
         journal = ResultsJournal(parent=self)
         journal.exec()
+
+    def open_notes_manager(self):
+        notes = NotesManager(parent=self)
+        notes.exec()
 
     @asyncSlot()
     async def on_send_clicked(self):

@@ -3,6 +3,7 @@ import os
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QTextEdit, QLineEdit, 
                              QPushButton, QHBoxLayout, QCheckBox, QLabel, QScrollArea, QSlider)
 from PyQt6.QtCore import Qt, pyqtSignal, QThread
+from notes_manager import NotesManager
 from gradio_client import Client
 from dotenv import load_dotenv
 
@@ -130,9 +131,14 @@ class GLMChatWindow(QWidget):
         self.btn_reset.clicked.connect(self.reset_chat)
         self.btn_reset.setStyleSheet("background-color: #441111; color: white; padding: 10px 15px; border-radius: 5px;")
 
+        btn_notes = QPushButton("📝 Notes")
+        btn_notes.clicked.connect(self.open_notes)
+        btn_notes.setStyleSheet("background-color: #4b5563; color: white; padding: 10px 15px; border-radius: 5px;")
+
         bottom_layout.addWidget(self.input_field)
         bottom_layout.addWidget(self.btn_send)
         bottom_layout.addWidget(self.btn_reset)
+        bottom_layout.addWidget(btn_notes)
         layout.addLayout(bottom_layout)
 
         self.setLayout(layout)
@@ -188,6 +194,10 @@ class GLMChatWindow(QWidget):
             client.predict(api_name="/reset")
         except:
             pass
+
+    def open_notes(self):
+        notes = NotesManager(parent=self)
+        notes.exec()
 
 if __name__ == "__main__":
     from PyQt6.QtWidgets import QApplication

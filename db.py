@@ -62,6 +62,17 @@ def init_db():
         
         # Таблица настроек
         cursor.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
+        
+        # Таблица заметок
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS notes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                tag TEXT,
+                title TEXT,
+                content TEXT
+            )
+        """)
         conn.commit()
 
 # --- CRUD для моделей ---

@@ -2,6 +2,7 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QTableView,
                              QPushButton, QHeaderView, QMessageBox, QLabel, QLineEdit, QAbstractItemView, QItemDelegate, QComboBox)
 from PyQt6.QtSql import QSqlDatabase, QSqlTableModel
 from PyQt6.QtCore import Qt, QSortFilterProxyModel
+from notes_manager import NotesManager
 from md_viewer import MarkdownViewer
 import db
 
@@ -98,9 +99,13 @@ class ResultsJournal(QDialog):
         btn_close = QPushButton("Close")
         btn_close.clicked.connect(self.accept)
 
+        btn_notes = QPushButton("📝 Notes")
+        btn_notes.clicked.connect(self.open_notes)
+
         btns_layout.addWidget(btn_delete)
         btns_layout.addWidget(btn_open)
         btns_layout.addWidget(btn_refresh)
+        btns_layout.addWidget(btn_notes)
         btns_layout.addStretch()
         btns_layout.addWidget(btn_close)
         
@@ -150,3 +155,7 @@ class ResultsJournal(QDialog):
         sorted_stats = sorted(counts.items(), key=lambda x: x[1], reverse=True)
         top_str = " | ".join([f"🏆 {name}: {count}" for name, count in sorted_stats[:5]])
         self.stats_label.setText(f"🔥 Рейтинг моделей (ТОП-5): {top_str}")
+
+    def open_notes(self):
+        notes = NotesManager(parent=self)
+        notes.exec()

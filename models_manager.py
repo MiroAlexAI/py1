@@ -2,6 +2,7 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QTableView,
                              QPushButton, QHeaderView, QMessageBox, QLabel, QDoubleSpinBox, QItemDelegate, QComboBox)
 from PyQt6.QtSql import QSqlDatabase, QSqlTableModel
 from PyQt6.QtCore import Qt
+from notes_manager import NotesManager
 import os
 import db
 
@@ -93,8 +94,12 @@ class ModelsManager(QDialog):
         btn_close = QPushButton("Close")
         btn_close.clicked.connect(self.accept)
 
+        btn_notes = QPushButton("📝 Notes")
+        btn_notes.clicked.connect(self.open_notes)
+
         btns_layout.addWidget(btn_add)
         btns_layout.addWidget(btn_delete)
+        btns_layout.addWidget(btn_notes)
         btns_layout.addStretch()
         btns_layout.addWidget(btn_close)
         
@@ -129,6 +134,10 @@ class ModelsManager(QDialog):
 
     def save_timeout(self):
         db.set_setting("request_timeout", self.timeout_spin.value())
+
+    def open_notes(self):
+        notes = NotesManager(parent=self)
+        notes.exec()
 
 class KeySelectionDelegate(QItemDelegate):
     """Делегат для удобного выбора имен ключей API из .env."""
