@@ -7,10 +7,10 @@ import db
 
 logger = logging.getLogger(__name__)
 
-async def fetch_model_response(model_name, api_url, api_key_name, prompt, timeout=60):
+async def fetch_model_response(model_name, api_url, api_key_name, prompt, timeout=60, 
+                         temperature=0.7, max_tokens=2000, top_p=1.0, thinking=False):
     """
-    Отправляет асинхронный запрос к API конкретной модели.
-    Поддерживает ротацию ключей для OpenRouter и интеграцию с Hugging Face.
+    Отправляет асинхронный запрос к API конкретной модели с учетом глобальных параметров.
     """
     load_dotenv()
     
@@ -23,6 +23,9 @@ async def fetch_model_response(model_name, api_url, api_key_name, prompt, timeou
         if k2: api_keys.append(k2)
     elif api_key_name in ["HF_API_KEY", "HF_TOKEN"]:
         k = os.getenv("HF_API_KEY") or os.getenv("HF_TOKEN")
+        if k: api_keys.append(k)
+    elif api_key_name == "ZAI_API_KEY":
+        k = os.getenv("ZAI_API_KEY")
         if k: api_keys.append(k)
     else:
         k = os.getenv(api_key_name)
@@ -51,9 +54,23 @@ async def fetch_model_response(model_name, api_url, api_key_name, prompt, timeou
 
         data = {
             "model": model_name,
-            "messages": [{"role": "user", "content": prompt}]
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "top_p": top_p
         }
+
+        # Специфичный блок для z.ai (GLM)
+        if "z.ai" in api_url:
+            data["model"] = model_name.lower()
+            if thinking:
+                data["thinking"] = {
+                    "type": "enabled"
+                }
         
+        # Поддержка thinking для других (OpenRouter/OpenAI-like если поддерживается)
+        # Примечание: не все API поддерживают thinking в таком формате, для z.ai он специфичен.
+
         try:
             async with httpx.AsyncClient(timeout=float(timeout)) as client:
                 response = await client.post(api_url, headers=headers, json=data)
@@ -63,12 +80,16 @@ async def fetch_model_response(model_name, api_url, api_key_name, prompt, timeou
                     logger.warning(f"Key {i+1} failed ({response.status_code}) for {model_name}. Switching...")
                     continue
                 
-                response.raise_for_status()
+                if response.status_code != 200:
+                    error_text = response.text
+                    logger.error(f"API Error {response.status_code} for {model_name}: {error_text}")
+                    logger.debug(f"Sent payload: {data}")
+                    return {"model": model_name, "response": f"Error {response.status_code}: {error_text}. Sent: {data['model']}", "status": "Error: API"}
+
                 result = response.json()
                 content = result.get('choices', [{}])[0].get('message', {}).get('content')
                 
                 if content:
-                    # Важно: возвращаем именно полученный ответ
                     return {"model": model_name, "response": content, "status": "Success"}
                 else:
                     return {"model": model_name, "response": "Empty answer from model", "status": "Error: Parse"}
@@ -82,11 +103,11 @@ async def fetch_model_response(model_name, api_url, api_key_name, prompt, timeou
 
     return {"model": model_name, "response": last_error, "status": "Error"}
 
-async def delayed_fetch(delay, model_name, api_url, api_key_name, prompt, timeout=60):
+async def delayed_fetch(delay, model_name, api_url, api_key_name, prompt, timeout=60, **kwargs):
     """Вспомогательная функция для ступенчатого запуска запросов."""
     if delay > 0:
         await asyncio.sleep(delay)
-    return await fetch_model_response(model_name, api_url, api_key_name, prompt, timeout)
+    return await fetch_model_response(model_name, api_url, api_key_name, prompt, timeout, **kwargs)
 
 async def send_parallel_prompts(active_models, prompt):
     """Отправляет промт одновременно во все активные модели с учетом задержки."""

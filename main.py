@@ -5,9 +5,10 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QWidget,
                              QLabel, QPushButton, QHBoxLayout, QTextEdit, 
                              QTableView, QHeaderView, QAbstractItemView, 
                              QMessageBox, QSplitter, QComboBox, QLineEdit, QFileDialog, 
-                             QProgressBar, QTabWidget)
+                             QProgressBar, QTabWidget, QGroupBox, QFormLayout, QDoubleSpinBox, 
+                             QSpinBox, QCheckBox)
 from PyQt6.QtCore import Qt, pyqtSlot, QAbstractTableModel, QVariant, QSortFilterProxyModel
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QColor
 from qasync import QEventLoop, asyncSlot
 import json
 
@@ -198,6 +199,11 @@ class MainWindow(QMainWindow):
         models_logic.setup_default_models()
         
         self.special_chat_window = None
+        self.models_manager_window = None
+        self.results_journal_window = None
+        self.notes_manager_window = None
+        self.viewer_windows = [] # Список для хранения немодальных окон просмотра
+
         self.results_model = ResultsTableModel()
         self.proxy_model = QSortFilterProxyModel()
         self.proxy_model.setSourceModel(self.results_model)
@@ -286,6 +292,9 @@ class MainWindow(QMainWindow):
         history_layout.addWidget(btn_delete_prompt)
         history_layout.addStretch()
 
+        # Layout for Prompts + Settings
+        prompts_settings_layout = QHBoxLayout()
+        
         # Тройной промпт (Tab Widget)
         self.prompt_tabs = QTabWidget()
         self.prompt_tabs.setStyleSheet("QTabBar::tab { padding: 8px 30px; background: #dcdcdc; border: 1px solid #aca899; } QTabBar::tab:selected { background: #ffffff; border-bottom-color: white; }")
@@ -300,7 +309,50 @@ class MainWindow(QMainWindow):
         self.prompt_tabs.addTab(self.p1_input, "🎯 Prompt 1")
         self.prompt_tabs.addTab(self.p2_input, "📖 Prompt 2")
         self.prompt_tabs.addTab(self.p3_input, "🏗️ Prompt 3")
+
+        # Сигналы для индикации текста во вкладках
+        self.p1_input.textChanged.connect(self.update_tab_indicators)
+        self.p2_input.textChanged.connect(self.update_tab_indicators)
+        self.p3_input.textChanged.connect(self.update_tab_indicators)
+        self.update_tab_indicators() # Инициализация
+
+        # Панель глобальных настроек ИИ
+        settings_group = QGroupBox("⚙️ Global AI Settings")
+        settings_group.setMaximumWidth(250)
+        settings_group.setStyleSheet("QGroupBox { font-weight: bold; color: #3b82f6; border: 1px solid #ccc; margin-top: 10px; padding-top: 10px; }")
+        settings_form = QFormLayout(settings_group)
         
+        self.spin_temp = QDoubleSpinBox()
+        self.spin_temp.setRange(0.0, 2.0)
+        self.spin_temp.setSingleStep(0.1)
+        self.spin_temp.setValue(float(db.get_setting("global_temp", 0.7)))
+        self.spin_temp.valueChanged.connect(lambda v: db.set_setting("global_temp", v))
+        
+        self.spin_tokens = QSpinBox()
+        self.spin_tokens.setRange(1, 32000)
+        self.spin_tokens.setSingleStep(100)
+        self.spin_tokens.setValue(int(db.get_setting("global_max_tokens", 2000)))
+        self.spin_tokens.valueChanged.connect(lambda v: db.set_setting("global_max_tokens", v))
+        
+        self.spin_top_p = QDoubleSpinBox()
+        self.spin_top_p.setRange(0.0, 1.0)
+        self.spin_top_p.setSingleStep(0.05)
+        self.spin_top_p.setValue(float(db.get_setting("global_top_p", 1.0)))
+        self.spin_top_p.valueChanged.connect(lambda v: db.set_setting("global_top_p", v))
+        
+        self.cb_thinking = QCheckBox("Enable Thinking")
+        self.cb_thinking.setToolTip("Activates reasoning/thinking for GLM and some other models.")
+        self.cb_thinking.setChecked(db.get_setting("global_thinking", "0") == "1")
+        self.cb_thinking.toggled.connect(lambda v: db.set_setting("global_thinking", "1" if v else "0"))
+        
+        settings_form.addRow("Temperature:", self.spin_temp)
+        settings_form.addRow("Max Tokens:", self.spin_tokens)
+        settings_form.addRow("Top P:", self.spin_top_p)
+        settings_form.addRow(self.cb_thinking)
+        
+        prompts_settings_layout.addWidget(self.prompt_tabs, 3)
+        prompts_settings_layout.addWidget(settings_group, 1)
+
         btn_send = QPushButton("Send Triple Prompt (Combined)")
         btn_send.setObjectName("send_btn")
         self.btn_send = btn_send
@@ -315,7 +367,7 @@ class MainWindow(QMainWindow):
 
         input_layout.addWidget(prompt_label)
         input_layout.addLayout(history_layout)
-        input_layout.addWidget(self.prompt_tabs)
+        input_layout.addLayout(prompts_settings_layout) # Заменили prompt_tabs на новый layout
         
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
@@ -409,16 +461,22 @@ class MainWindow(QMainWindow):
         self.special_chat_window.show()
 
     def open_models_manager(self):
-        manager = ModelsManager(parent=self)
-        manager.exec()
+        if self.models_manager_window is None:
+            self.models_manager_window = ModelsManager(parent=self)
+        self.models_manager_window.show()
+        self.models_manager_window.raise_()
 
     def open_results_journal(self):
-        journal = ResultsJournal(parent=self)
-        journal.exec()
+        if self.results_journal_window is None:
+            self.results_journal_window = ResultsJournal(parent=self)
+        self.results_journal_window.show()
+        self.results_journal_window.raise_()
 
     def open_notes_manager(self):
-        notes = NotesManager(parent=self)
-        notes.exec()
+        if self.notes_manager_window is None:
+            self.notes_manager_window = NotesManager(parent=self)
+        self.notes_manager_window.show()
+        self.notes_manager_window.raise_()
 
     @asyncSlot()
     async def on_send_clicked(self):
@@ -450,8 +508,15 @@ class MainWindow(QMainWindow):
             completed = 0
             all_results = []
             delay_step = float(db.get_setting("request_delay", 0.0))
+            delay_step = float(db.get_setting("request_delay", 0.0))
             timeout = float(db.get_setting("request_timeout", 60.0))
             
+            # Считываем глобальные настройки из интерфейса
+            temperature = self.spin_temp.value()
+            max_tokens = self.spin_tokens.value()
+            top_p = self.spin_top_p.value()
+            thinking = self.cb_thinking.isChecked()
+
             async def wrap_task(task, model_info):
                 res = await task
                 res['api_url'] = model_info[1]
@@ -460,10 +525,17 @@ class MainWindow(QMainWindow):
                 res['p1'] = p1
                 res['p2'] = p2
                 res['p3'] = p3
+                # Сохраняем настройки в объекте результата для возможности Retry с теми же параметрами
+                res['temperature'] = temperature
+                res['max_tokens'] = max_tokens
+                res['top_p'] = top_p
+                res['thinking'] = thinking
                 return res
 
-            wrapped_tasks = [wrap_task(network.delayed_fetch(i * delay_step, m[0], m[1], m[2], combined_prompt, timeout), m) 
-                             for i, m in enumerate(active_models)]
+            wrapped_tasks = [wrap_task(network.delayed_fetch(
+                                i * delay_step, m[0], m[1], m[2], combined_prompt, timeout,
+                                temperature=temperature, max_tokens=max_tokens, top_p=top_p, thinking=thinking
+                             ), m) for i, m in enumerate(active_models)]
             
             for future in asyncio.as_completed(wrapped_tasks):
                 res = await future
@@ -507,8 +579,11 @@ class MainWindow(QMainWindow):
                     if table_name == "prompts":
                         p1_id = pid
             
-            # Результат привязываем к P1 (если он есть) или к 0
-            db.save_result(p1_id or 0, item['model'], item['response'], table="results")
+            # Собираем полный промпт для сохранения в результат
+            full_prompt_text = "\n\n".join([p for p in [parts["prompts"], parts["prompts2"], parts["prompts3"]] if p])
+            
+            # Результат привязываем к P1 (если он есть) или к 0, передаем полный текст
+            db.save_result(p1_id or 0, item['model'], item['response'], table="results", full_prompt=full_prompt_text)
             saved_count += 1
             
         QMessageBox.information(self, "Success", f"Saved {saved_count} items. Prompts sorted to slots.")
@@ -595,6 +670,12 @@ class MainWindow(QMainWindow):
             delay_step = float(db.get_setting("request_delay", 0.0))
             timeout = float(db.get_setting("request_timeout", 60.0))
             
+            # Считываем текущие настройки из интерфейса
+            temperature = self.spin_temp.value()
+            max_tokens = self.spin_tokens.value()
+            top_p = self.spin_top_p.value()
+            thinking = self.cb_thinking.isChecked()
+
             async def run_retry(idx, delay):
                 item = data[idx]
                 model_name = item['model']
@@ -613,18 +694,25 @@ class MainWindow(QMainWindow):
                         item['status'] = "Error: Model info missing"
                         return
 
-                res = await network.delayed_fetch(delay, model_name, api_url, api_key_name, combined_prompt, timeout)
+                res = await network.delayed_fetch(
+                    delay, model_name, api_url, api_key_name, combined_prompt, timeout,
+                    temperature=temperature, max_tokens=max_tokens, top_p=top_p, thinking=thinking
+                )
                 item['response'] = res['response']
                 item['status'] = res['status']
                 item['api_url'] = api_url 
                 item['api_key_name'] = api_key_name
+                # Обновляем сохраненные настройки в элементе
+                item['temperature'] = temperature
+                item['max_tokens'] = max_tokens
+                item['top_p'] = top_p
+                item['thinking'] = thinking
 
             tasks = [run_retry(idx, i * delay_step) for i, idx in enumerate(failed_indices)]
             await asyncio.gather(*tasks)
 
             # Обновляем таблицу атомарно
             self.results_model.beginResetModel()
-            # Данные уже изменены внутри run_retry, так как item — ссылка на объект в списке
             self.results_model.endResetModel()
             self.results_table.resizeRowsToContents()
             QMessageBox.information(self, "Retry", f"Retry completed for {len(failed_indices)} items.")
@@ -635,6 +723,15 @@ class MainWindow(QMainWindow):
         finally:
             self.btn_retry.setEnabled(True)
             self.btn_retry.setText("🔄 Retry Errors")
+
+    def update_tab_indicators(self):
+        """Меняет цвет текста вкладок на салатовый, если в них есть текст."""
+        inputs = [self.p1_input, self.p2_input, self.p3_input]
+        for i, text_edit in enumerate(inputs):
+            has_text = bool(text_edit.toPlainText().strip())
+            # Салатовый #10b981 если есть текст, иначе черный (или темно-серый #444)
+            color = "#10b981" if has_text else "#444444" 
+            self.prompt_tabs.tabBar().setTabTextColor(i, QColor(color))
 
     def load_history(self):
         """Загрузка истории для текущей активной вкладки промпта."""
@@ -670,14 +767,20 @@ class MainWindow(QMainWindow):
             row_data = self.results_model._data[source_index.row()]
         
         viewer = MarkdownViewer(row_data['model'], row_data['response'], self)
-        viewer.exec()
+        viewer.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self.viewer_windows.append(viewer)
+        viewer.show()
+        viewer.raise_()
 
     def on_table_double_clicked(self, index):
         """Открытие по двойному клику."""
         source_index = self.proxy_model.mapToSource(index)
         row_data = self.results_model._data[source_index.row()]
         viewer = MarkdownViewer(row_data['model'], row_data['response'], self)
-        viewer.exec()
+        viewer.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self.viewer_windows.append(viewer)
+        viewer.show()
+        viewer.raise_()
 
     def export_markdown(self):
         """Экспорт результатов в Markdown таблицу."""

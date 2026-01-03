@@ -25,12 +25,19 @@ def init_db():
             CREATE TABLE IF NOT EXISTS results (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 prompt_id INTEGER,
+                full_prompt TEXT,
                 model_name TEXT,
                 response TEXT,
                 date TEXT,
                 FOREIGN KEY (prompt_id) REFERENCES prompts(id) ON DELETE CASCADE
             )
         """)
+        
+        # Миграция: Проверяем наличие колонки full_prompt
+        cursor.execute("PRAGMA table_info(results)")
+        columns = [column[1] for column in cursor.fetchall()]
+        if 'full_prompt' not in columns:
+            cursor.execute("ALTER TABLE results ADD COLUMN full_prompt TEXT")
 
         # Таблицы для второго типа промптов
         cursor.execute("CREATE TABLE IF NOT EXISTS prompts2 (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, prompt TEXT, tags TEXT)")
@@ -131,21 +138,25 @@ def get_prompt_id(text, table="prompts"):
 
 # --- Сохранение результатов ---
 
-def save_result(prompt_id, model_name, response, table="results"):
+def save_result(prompt_id, model_name, response, table="results", full_prompt=""):
     with get_connection() as conn:
         cursor = conn.cursor()
         date_str = datetime.now().isoformat()
-        cursor.execute(f"INSERT INTO {table} (prompt_id, model_name, response, date) VALUES (?, ?, ?, ?)",
-                       (prompt_id, model_name, response, date_str))
+        if table == "results":
+            cursor.execute(f"INSERT INTO {table} (prompt_id, model_name, response, date, full_prompt) VALUES (?, ?, ?, ?, ?)",
+                           (prompt_id, model_name, response, date_str, full_prompt))
+        else:
+            cursor.execute(f"INSERT INTO {table} (prompt_id, model_name, response, date) VALUES (?, ?, ?, ?)",
+                           (prompt_id, model_name, response, date_str))
         conn.commit()
 
 def get_results(prompt_id=None):
     with get_connection() as conn:
         cursor = conn.cursor()
         if prompt_id:
-            cursor.execute("SELECT id, prompt_id, model_name, response, date FROM results WHERE prompt_id = ? ORDER BY date DESC", (prompt_id,))
+            cursor.execute("SELECT id, prompt_id, model_name, response, date, full_prompt FROM results WHERE prompt_id = ? ORDER BY date DESC", (prompt_id,))
         else:
-            cursor.execute("SELECT id, prompt_id, model_name, response, date FROM results ORDER BY date DESC")
+            cursor.execute("SELECT id, prompt_id, model_name, response, date, full_prompt FROM results ORDER BY date DESC")
         return cursor.fetchall()
 
 def delete_result(result_id):

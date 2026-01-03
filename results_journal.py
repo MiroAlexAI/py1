@@ -14,6 +14,7 @@ class ResultsJournal(QDialog):
         self.resize(1000, 600)
         
         self.init_db()
+        self.viewer_windows = [] # Для хранения ссылок на немодальные окна просмотра
         self.init_ui()
 
     def init_db(self):
@@ -29,12 +30,13 @@ class ResultsJournal(QDialog):
         self.model.setTable("results")
         self.model.setEditStrategy(QSqlTableModel.EditStrategy.OnFieldChange)
         
-        # Headers: id, prompt_id, model_name, response, date
+        # Headers: id, prompt_id, model_name, response, date, full_prompt
         self.model.setHeaderData(0, Qt.Orientation.Horizontal, "ID")
         self.model.setHeaderData(1, Qt.Orientation.Horizontal, "Prompt ID")
         self.model.setHeaderData(2, Qt.Orientation.Horizontal, "Model")
         self.model.setHeaderData(3, Qt.Orientation.Horizontal, "Response")
         self.model.setHeaderData(4, Qt.Orientation.Horizontal, "Date")
+        self.model.setHeaderData(5, Qt.Orientation.Horizontal, "Prompt Content")
         
         self.model.select()
 
@@ -73,8 +75,8 @@ class ResultsJournal(QDialog):
         self.table_view.setColumnWidth(1, 70)
         self.table_view.setColumnWidth(2, 120)
         self.table_view.setColumnWidth(4, 150)
+        self.table_view.setColumnWidth(5, 300) # Full Prompt column
         
-        # Removed dark styling to match global classic theme
         layout.addWidget(self.table_view)
 
         # Секция статистики
@@ -137,7 +139,10 @@ class ResultsJournal(QDialog):
         response_text = self.model.index(row, 3).data()
         
         viewer = MarkdownViewer(model_name, response_text, self)
-        viewer.exec()
+        viewer.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self.viewer_windows.append(viewer)
+        viewer.show()
+        viewer.raise_()
 
     def update_stats(self):
         """Подсчет рейтинга моделей по количеству сохраненных записей."""

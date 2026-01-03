@@ -151,7 +151,8 @@ class KeySelectionDelegate(QItemDelegate):
             "DEEPSEEK_API_KEY", 
             "GROQ_API_KEY",
             "HF_TOKEN",
-            "HF_API_KEY"
+            "HF_API_KEY",
+            "ZAI_API_KEY"
         ]
 
     def createEditor(self, parent, option, index):
