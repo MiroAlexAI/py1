@@ -29,6 +29,8 @@ def init_db():
                 model_name TEXT,
                 response TEXT,
                 date TEXT,
+                resp_time REAL,
+                status TEXT,
                 FOREIGN KEY (prompt_id) REFERENCES prompts(id) ON DELETE CASCADE
             )
         """)
@@ -38,6 +40,10 @@ def init_db():
         columns = [column[1] for column in cursor.fetchall()]
         if 'full_prompt' not in columns:
             cursor.execute("ALTER TABLE results ADD COLUMN full_prompt TEXT")
+        if 'resp_time' not in columns:
+            cursor.execute("ALTER TABLE results ADD COLUMN resp_time REAL")
+        if 'status' not in columns:
+            cursor.execute("ALTER TABLE results ADD COLUMN status TEXT")
 
         # Таблицы для второго типа промптов
         cursor.execute("CREATE TABLE IF NOT EXISTS prompts2 (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, prompt TEXT, tags TEXT)")
@@ -138,17 +144,54 @@ def get_prompt_id(text, table="prompts"):
 
 # --- Сохранение результатов ---
 
-def save_result(prompt_id, model_name, response, table="results", full_prompt=""):
+def save_result(prompt_id, model_name, response, table="results", full_prompt="", resp_time=0.0, status="Success"):
     with get_connection() as conn:
         cursor = conn.cursor()
         date_str = datetime.now().isoformat()
         if table == "results":
-            cursor.execute(f"INSERT INTO {table} (prompt_id, model_name, response, date, full_prompt) VALUES (?, ?, ?, ?, ?)",
-                           (prompt_id, model_name, response, date_str, full_prompt))
+            cursor.execute(f"INSERT INTO {table} (prompt_id, model_name, response, date, full_prompt, resp_time, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                           (prompt_id, model_name, response, date_str, full_prompt, resp_time, status))
         else:
             cursor.execute(f"INSERT INTO {table} (prompt_id, model_name, response, date) VALUES (?, ?, ?, ?)",
                            (prompt_id, model_name, response, date_str))
         conn.commit()
+
+def get_model_metrics(model_name):
+    """Возвращает (среднее_время, количество_ошибок) для модели."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT AVG(resp_time), COUNT(*) FILTER (WHERE status LIKE 'Error%')
+            FROM results 
+            WHERE model_name = ? AND resp_time > 0
+        """, (model_name,))
+        res = cursor.fetchone()
+        return (round(res[0], 2) if res[0] else 0.0, res[1] or 0)
+
+def get_all_metrics():
+    """Возвращает метрики для всех моделей."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT model_name, AVG(resp_time), COUNT(*) FILTER (WHERE status LIKE 'Error%')
+            FROM results 
+            WHERE resp_time > 0
+            GROUP BY model_name
+        """)
+        return {row[0]: {"avg_time": round(row[1], 2), "errors": row[2]} for row in cursor.fetchall()}
+
+def get_model_popularity_rating(limit=5):
+    """Возвращает список самых используемых моделей на основе сохраненных результатов."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT model_name, COUNT(*) as cnt 
+            FROM results 
+            GROUP BY model_name 
+            ORDER BY cnt DESC 
+            LIMIT ?
+        """, (limit,))
+        return cursor.fetchall()
 
 def get_results(prompt_id=None):
     with get_connection() as conn:

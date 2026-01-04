@@ -1,8 +1,10 @@
-from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QTableView, 
-                             QPushButton, QHeaderView, QMessageBox, QLabel, QDoubleSpinBox, QItemDelegate, QComboBox)
+from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QTableView, QWidget,
+                             QPushButton, QHeaderView, QMessageBox, QLabel, QDoubleSpinBox, QItemDelegate, QComboBox, QGroupBox, QFrame)
 from PyQt6.QtSql import QSqlDatabase, QSqlTableModel
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QFont
 from notes_manager import NotesManager
+from dotenv import load_dotenv
 import os
 import db
 
@@ -15,6 +17,8 @@ class ModelsManager(QDialog):
         
         self.init_db()
         self.init_ui()
+        self.update_env_status() # Первичная валидация
+        self.update_rating()     # Загрузка рейтинга
 
     def init_db(self):
         # Проверяем, есть ли уже соединение
@@ -72,6 +76,34 @@ class ModelsManager(QDialog):
         settings_layout.addStretch()
         
         layout.addLayout(settings_layout)
+
+        # Секция валидации .env
+        env_group = QGroupBox("🔑 .env Keys Validation")
+        env_group.setStyleSheet("QGroupBox { font-weight: bold; color: #3b82f6; border: 1px solid #ccc; margin-top: 5px; padding-top: 15px; }")
+        self.env_layout = QHBoxLayout(env_group)
+        self.env_layout.setContentsMargins(10, 5, 10, 5)
+        
+        self.btn_refresh_env = QPushButton("🔄 Scan .env")
+        self.btn_refresh_env.setFixedWidth(100)
+        self.btn_refresh_env.clicked.connect(self.update_env_status)
+        self.env_layout.addWidget(self.btn_refresh_env)
+        
+        # Контейнер для индикаторов
+        self.indicators_container = QWidget()
+        self.indicators_layout = QHBoxLayout(self.indicators_container)
+        self.indicators_layout.setContentsMargins(0,0,0,0)
+        self.env_layout.addWidget(self.indicators_container)
+        
+        layout.addWidget(env_group)
+
+        # Секция рейтинга моделей
+        rating_group = QGroupBox("🏆 Model Popularity Rating")
+        rating_group.setStyleSheet("QGroupBox { font-weight: bold; color: #f59e0b; border: 1px solid #ccc; margin-top: 5px; padding-top: 15px; }")
+        self.rating_layout = QHBoxLayout(rating_group)
+        self.rating_label = QLabel("Loading rating...")
+        self.rating_label.setStyleSheet("color: #4b5563; font-weight: normal;")
+        self.rating_layout.addWidget(self.rating_label)
+        layout.addWidget(rating_group)
 
         info_label = QLabel("Double-click a cell to edit. Changes are saved automatically.")
         info_label.setStyleSheet("color: #888; font-style: italic;")
@@ -134,6 +166,58 @@ class ModelsManager(QDialog):
 
     def save_timeout(self):
         db.set_setting("request_timeout", self.timeout_spin.value())
+
+    def update_env_status(self):
+        """Проверяет наличие ключей в .env и обновляет индикаторы."""
+        load_dotenv(override=True) # Перезагружаем переменные окружения
+        
+        # Очищаем старые индикаторы
+        for i in reversed(range(self.indicators_layout.count())): 
+            self.indicators_layout.itemAt(i).widget().setParent(None)
+
+        keys_to_check = [
+            "OPENROUTER_API_KEY", "OPENROUTER_API_KEY2", 
+            "OPENAI_API_KEY", "ZAI_API_KEY", "HF_TOKEN"
+        ]
+        
+        for key in keys_to_check:
+            val = os.getenv(key)
+            has_key = bool(val and val.strip())
+            
+            lbl = QLabel(f"{key}")
+            color = "#10b981" if has_key else "#ef4444" # Green if found, Red if missing
+            status_text = "●" # Кружок-индикатор
+            
+            dot = QLabel(status_text)
+            dot.setStyleSheet(f"color: {color}; font-size: 18px; font-weight: bold;")
+            
+            item_layout = QHBoxLayout()
+            item_layout.setSpacing(2)
+            item_layout.addWidget(dot)
+            item_layout.addWidget(lbl)
+            
+            container = QWidget()
+            container.setLayout(item_layout)
+            self.indicators_layout.addWidget(container)
+        
+        self.indicators_layout.addStretch()
+
+    def update_rating(self):
+        """Загружает и отображает ТОП-5 популярных моделей."""
+        try:
+            rating = db.get_model_popularity_rating(limit=5)
+            if not rating:
+                self.rating_label.setText("No saved results yet.")
+                return
+            
+            items = []
+            for i, (name, count) in enumerate(rating):
+                medal = ["🥇", "🥈", "🥉", "▫️", "▫️"][i] if i < 5 else "▫️"
+                items.append(f"{medal} {name}: {count}")
+            
+            self.rating_label.setText(" | ".join(items))
+        except Exception as e:
+            self.rating_label.setText(f"Rating error: {e}")
 
     def open_notes(self):
         notes = NotesManager(parent=self)

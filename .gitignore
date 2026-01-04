@@ -8,6 +8,7 @@ __pycache__/
 .venv
 env/
 venv/
+.memory_bank/
 
 # Project specifically
 chatlist.db

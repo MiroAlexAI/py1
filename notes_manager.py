@@ -41,9 +41,17 @@ class NotesManager(QDialog):
         
         # Верхняя панель управления
         top_layout = QHBoxLayout()
-        title_label = QLabel("Управление заметками и впечатлениями")
+        title_label = QLabel("Управление заметками")
         title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #3b82f6;")
         top_layout.addWidget(title_label)
+        
+        # Поле поиска
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("🔍 Поиск по содержанию / тегам...")
+        self.search_input.setFixedWidth(250)
+        self.search_input.textChanged.connect(self.update_search_filter)
+        top_layout.addWidget(self.search_input)
+        
         top_layout.addStretch()
         
         btn_add = QPushButton("+ Добавить заметку")
@@ -157,3 +165,14 @@ class NotesManager(QDialog):
             self.model.submitAll()
             self.model.select()
             self.clear_edits()
+
+    def update_search_filter(self, text):
+        """Фильтрация заметок по вводу."""
+        if not text:
+            self.model.setFilter("")
+        else:
+            # Простейшее экранирование для предотвращения ошибок SQL при вводе '
+            safe_text = text.replace("'", "''")
+            filter_str = f"(content LIKE '%{safe_text}%' OR title LIKE '%{safe_text}%' OR tag LIKE '%{safe_text}%')"
+            self.model.setFilter(filter_str)
+        self.model.select()

@@ -1,0 +1,6 @@
+PyQt6>=6.5.0
+qasync>=0.24.0
+httpx>=0.24.0
+python-dotenv>=1.0.0
+markdown2>=2.4.0
+gradio_client>=0.7.0

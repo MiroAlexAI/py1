@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QWidget,
                              QMessageBox, QSplitter, QComboBox, QLineEdit, QFileDialog, 
                              QProgressBar, QTabWidget, QGroupBox, QFormLayout, QDoubleSpinBox, 
                              QSpinBox, QCheckBox)
-from PyQt6.QtCore import Qt, pyqtSlot, QAbstractTableModel, QVariant, QSortFilterProxyModel
+from PyQt6.QtCore import Qt, pyqtSlot, QSortFilterProxyModel
 from PyQt6.QtGui import QFont, QColor
 from qasync import QEventLoop, asyncSlot
 import json
@@ -20,6 +20,8 @@ from hf_space_chat import GLMChatWindow
 from md_viewer import MarkdownViewer
 from models_manager import ModelsManager
 from results_journal import ResultsJournal
+from table_models import ResultsTableModel
+from styles import GLOBAL_STYLE
 
 # Настройка логирования
 logging.basicConfig(
@@ -31,162 +33,6 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger("ChatList")
-
-GLOBAL_STYLE = """
-    QMainWindow, QDialog {
-        background-color: #ECE9D8;
-    }
-    QWidget {
-        color: #000000;
-        font-family: 'Tahoma', 'Segoe UI', 'Arial';
-        font-size: 11px;
-    }
-    QLabel {
-        color: #000000;
-    }
-    QPushButton {
-        background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #ffffff, stop:1 #dcdcdc);
-        border: 1px solid #003C74;
-        border-radius: 3px;
-        padding: 5px 15px;
-        color: #000000;
-    }
-    QPushButton:hover {
-        background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #fff5cc, stop:1 #ffcc00);
-        border-color: #ff9900;
-    }
-    QPushButton:pressed {
-        background-color: #dcdcdc;
-    }
-    QPushButton#send_btn {
-        background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #4ba6ff, stop:1 #0056b3);
-        color: white;
-        font-weight: bold;
-        border: 1px solid #003c74;
-    }
-    QTextEdit, QLineEdit {
-        background-color: #ffffff;
-        border: 2px inset #999999;
-        color: #000000;
-        selection-background-color: #316AC5;
-    }
-    QTableView {
-        background-color: #ffffff;
-        gridline-color: #d5d5d5;
-        border: 2px inset #999999;
-        selection-background-color: #316AC5;
-        selection-color: #ffffff;
-    }
-    QHeaderView::section {
-        background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #ffffff, stop:1 #dcdcdc);
-        color: #000000;
-        padding: 4px;
-        border: 1px solid #aca899;
-    }
-    QComboBox {
-        background-color: #ffffff;
-        border: 1px solid #7F9DB9;
-        padding: 2px;
-    }
-    QProgressBar {
-        border: 1px solid #aca899;
-        background: #ffffff;
-        text-align: center;
-    }
-    QProgressBar::chunk {
-        background-color: #00ac00;
-        width: 10px;
-        margin: 0.5px;
-    }
-    QScrollBar:vertical {
-        background: #f0f0f0;
-        width: 16px;
-    }
-    QScrollBar::handle:vertical {
-        background: #dcdcdc;
-        border: 1px solid #aca899;
-    }
-"""
-
-class ResultsTableModel(QAbstractTableModel):
-    def __init__(self, data=None):
-        super().__init__()
-        self._data = data or []
-        self._headers = ["Select", "Slot", "Model", "Response", "Symbols", "Status", "Preview"]
-
-    def rowCount(self, parent=None):
-        return len(self._data)
-
-    def columnCount(self, parent=None):
-        return len(self._headers)
-
-    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
-        if not index.isValid():
-            return None
-        
-        row = index.row()
-        col = index.column()
-
-        if role == Qt.ItemDataRole.DisplayRole:
-            if col == 1: return self._data[row].get('slot', 'P1')
-            if col == 2: return self._data[row]['model']
-            if col == 3: 
-                resp = self._data[row]['response']
-                # Сокращаем вывод, чтобы таблица не была слишком высокой
-                lines = resp.split('\n')
-                if len(lines) > 3:
-                    return "\n".join(lines[:3]) + "..."
-                return (resp[:200] + '...') if len(resp) > 200 else resp
-            if col == 4: return str(len(self._data[row]['response']))
-            if col == 5: return self._data[row]['status']
-            if col == 6: return "🔍 Open"
-        
-        if role == Qt.ItemDataRole.CheckStateRole and col == 0:
-            return Qt.CheckState.Checked if self._data[row].get('selected') else Qt.CheckState.Unchecked
-
-        return None
-
-    def setData(self, index, value, role=Qt.ItemDataRole.EditRole):
-        if not index.isValid(): return False
-        
-        row = index.row()
-        col = index.column()
-
-        if role == Qt.ItemDataRole.CheckStateRole and col == 0:
-            if isinstance(value, int):
-                checked = (value == Qt.CheckState.Checked.value)
-            else:
-                checked = (value == Qt.CheckState.Checked)
-            self._data[row]['selected'] = checked
-            self.dataChanged.emit(index, index, [role])
-            return True
-        
-        if role == Qt.ItemDataRole.EditRole and col == 3:
-            self._data[row]['response'] = value
-            self.dataChanged.emit(index, index, [Qt.ItemDataRole.DisplayRole])
-            return True
-            
-        return False
-
-    def flags(self, index):
-        if not index.isValid():
-            return Qt.ItemFlag.NoItemFlags
-        if index.column() == 0:
-            return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsSelectable
-        return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
-
-    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
-        if role == Qt.ItemDataRole.DisplayRole and orientation == Qt.Orientation.Horizontal:
-            return self._headers[section]
-        return None
-
-    def update_data(self, new_data):
-        self.beginResetModel()
-        self._data = new_data
-        for item in self._data:
-            if 'selected' not in item:
-                item['selected'] = False
-        self.endResetModel()
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -353,12 +199,12 @@ class MainWindow(QMainWindow):
         prompts_settings_layout.addWidget(self.prompt_tabs, 3)
         prompts_settings_layout.addWidget(settings_group, 1)
 
-        btn_send = QPushButton("Send Triple Prompt (Combined)")
+        btn_send = QPushButton("Отправить тройной промпт")
         btn_send.setObjectName("send_btn")
         self.btn_send = btn_send
         self.btn_send.clicked.connect(self.on_send_clicked)
         
-        btn_preview = QPushButton("🔍 Preview Prompt")
+        btn_preview = QPushButton("🔍 Предпросмотр")
         btn_preview.clicked.connect(self.on_preview_prompt_clicked)
         
         btn_row_layout = QHBoxLayout()
@@ -496,9 +342,11 @@ class MainWindow(QMainWindow):
             return
 
         self.btn_send.setEnabled(False)
-        self.btn_send.setText("Processing Triple Request...")
+        self.btn_send.setText("Подключение к моделям...")
         
         self.results_model.update_data([])
+        # Подсвечиваем активные модели в таблице
+        self.results_model.set_active_models([m[0] for m in active_models])
         
         self.progress_bar.setRange(0, len(active_models))
         self.progress_bar.setValue(0)
@@ -508,8 +356,10 @@ class MainWindow(QMainWindow):
             completed = 0
             all_results = []
             delay_step = float(db.get_setting("request_delay", 0.0))
-            delay_step = float(db.get_setting("request_delay", 0.0))
             timeout = float(db.get_setting("request_timeout", 60.0))
+            
+            # Предварительно загружаем метрики всех моделей для отображения в результатах
+            all_metrics = db.get_all_metrics()
             
             # Считываем глобальные настройки из интерфейса
             temperature = self.spin_temp.value()
@@ -525,24 +375,26 @@ class MainWindow(QMainWindow):
                 res['p1'] = p1
                 res['p2'] = p2
                 res['p3'] = p3
-                # Сохраняем настройки в объекте результата для возможности Retry с теми же параметрами
                 res['temperature'] = temperature
                 res['max_tokens'] = max_tokens
                 res['top_p'] = top_p
                 res['thinking'] = thinking
+                # Подтягиваем исторические метрики
+                res['metrics'] = all_metrics.get(res['model'], {"avg_time": 0, "errors": 0})
                 return res
 
             wrapped_tasks = [wrap_task(network.delayed_fetch(
-                                i * delay_step, m[0], m[1], m[2], combined_prompt, timeout,
-                                temperature=temperature, max_tokens=max_tokens, top_p=top_p, thinking=thinking
-                             ), m) for i, m in enumerate(active_models)]
+                                 i * delay_step, m[0], m[1], m[2], combined_prompt, timeout,
+                                 temperature=temperature, max_tokens=max_tokens, top_p=top_p, thinking=thinking
+                              ), m) for i, m in enumerate(active_models)]
             
             for future in asyncio.as_completed(wrapped_tasks):
                 res = await future
                 all_results.append(res)
                 completed += 1
                 self.progress_bar.setValue(completed)
-                self.table_info_label.setText(f"Model Responses Comparison (Completed: {completed}/{len(active_models)})")
+                self.btn_send.setText(f"Выполнено: {completed}/{len(active_models)}")
+                self.table_info_label.setText(f"Сравнение ответов (Завершено: {completed}/{len(active_models)})")
                 self.results_model.update_data(all_results.copy())
                 self.results_table.resizeRowsToContents()
                 
@@ -551,7 +403,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", str(e))
         finally:
             self.btn_send.setEnabled(True)
-            self.btn_send.setText("Send Triple Prompt (Combined)")
+            self.btn_send.setText("Отправить тройной промпт")
             self.progress_bar.setVisible(False)
 
     def save_selected(self):
@@ -582,8 +434,10 @@ class MainWindow(QMainWindow):
             # Собираем полный промпт для сохранения в результат
             full_prompt_text = "\n\n".join([p for p in [parts["prompts"], parts["prompts2"], parts["prompts3"]] if p])
             
-            # Результат привязываем к P1 (если он есть) или к 0, передаем полный текст
-            db.save_result(p1_id or 0, item['model'], item['response'], table="results", full_prompt=full_prompt_text)
+            # Результат привязываем к P1 (если он есть) или к 0, передаем полный текст и метрики
+            db.save_result(p1_id or 0, item['model'], item['response'], table="results", 
+                           full_prompt=full_prompt_text, resp_time=item.get('resp_time', 0.0), 
+                           status=item.get('status', 'Success'))
             saved_count += 1
             
         QMessageBox.information(self, "Success", f"Saved {saved_count} items. Prompts sorted to slots.")

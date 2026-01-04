@@ -1,8 +1,10 @@
 import sys
 import os
+import webbrowser
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QTextEdit, QLineEdit, 
-                             QPushButton, QHBoxLayout, QCheckBox, QLabel, QScrollArea, QSlider)
-from PyQt6.QtCore import Qt, pyqtSignal, QThread
+                              QPushButton, QHBoxLayout, QCheckBox, QLabel, QScrollArea, QSlider, 
+                              QProgressBar, QApplication)
+from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer
 from notes_manager import NotesManager
 from gradio_client import Client
 from dotenv import load_dotenv
@@ -52,25 +54,66 @@ class GLMChatWindow(QWidget):
         self.resize(700, 850)
         
         layout = QVBoxLayout()
-        layout.setSpacing(15)
+        layout.setSpacing(10)
+        layout.setContentsMargins(10, 10, 10, 10)
 
-        # --- Блок настроек (виджет с рамкой) ---
+        # --- Блок настроек (Windows XP стиль) ---
         settings_group = QWidget()
-        settings_group.setStyleSheet("background-color: #1e1e1e; border: 1px solid #333; border-radius: 8px;")
+        settings_group.setStyleSheet("""
+            QWidget {
+                background-color: #ece9d8;
+                border: 2px solid #003c74;
+                border-radius: 4px;
+                font-family: 'Tahoma', 'Segoe UI', sans-serif;
+                font-size: 11px;
+            }
+        """)
         settings_layout = QVBoxLayout(settings_group)
+        settings_layout.setSpacing(8)
         
         # 1. Enable Thinking + Description
         thinking_layout = QVBoxLayout()
         self.cb_thinking = QCheckBox("Enable Thinking")
         self.cb_thinking.setChecked(True)
-        self.cb_thinking.setStyleSheet("QCheckBox { color: #8888ff; font-weight: bold; font-size: 16px; border: none; }")
+        self.cb_thinking.setStyleSheet("""
+            QCheckBox {
+                color: #000080;
+                font-weight: bold;
+                font-size: 12px;
+                background: transparent;
+                spacing: 5px;
+            }
+            QCheckBox::indicator {
+                width: 13px;
+                height: 13px;
+                border: 2px solid #808080;
+                background-color: #ffffff;
+                border-radius: 2px;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #0056b3;
+                border-color: #003c74;
+                image: url(data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIiIGhlaWdodD0iMTIiIHZpZXdCb3g9IjAgMCAxMiAxMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTEwIDRMNSA5TDEgNSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KPC9zdmc+);
+            }
+            QCheckBox::indicator:hover {
+                border-color: #0056b3;
+            }
+        """)
         
         thinking_desc = QLabel(
-            "Enabled: Activates the model's thinking capability.\n"
-            "Disabled: Disables the model's thinking capability."
+            "Enabled: Activates model's thinking capability.\n"
+            "Disabled: Disables model's thinking capability."
         )
         thinking_desc.setWordWrap(True)
-        thinking_desc.setStyleSheet("color: #ff4444; font-size: 11px; border: none; margin-top: 5px;")
+        thinking_desc.setStyleSheet("""
+            QLabel {
+                color: #555555;
+                font-size: 10px;
+                background: transparent;
+                margin-left: 20px;
+                margin-top: 2px;
+            }
+        """)
         
         thinking_layout.addWidget(self.cb_thinking)
         thinking_layout.addWidget(thinking_desc)
@@ -79,9 +122,28 @@ class GLMChatWindow(QWidget):
         # 2. Temperature Slider
         temp_header = QHBoxLayout()
         temp_label = QLabel("Temperature")
-        temp_label.setStyleSheet("color: #ffffff; background-color: #bbbbff; color: #4444ff; padding: 2px 10px; border-radius: 4px; border: none;")
+        temp_label.setStyleSheet("""
+            QLabel {
+                color: #000080;
+                font-weight: bold;
+                font-size: 12px;
+                background-color: #d4d0c8;
+                padding: 2px 8px;
+                border: 1px solid #808080;
+                border-radius: 3px;
+            }
+        """)
         self.temp_value_label = QLabel("0.4")
-        self.temp_value_label.setStyleSheet("color: #888; border: none; font-family: monospace;")
+        self.temp_value_label.setStyleSheet("""
+            QLabel {
+                color: #000000;
+                background-color: #ffffff;
+                border: 1px solid #808080;
+                padding: 2px 6px;
+                font-family: 'Courier New', monospace;
+                font-size: 11px;
+            }
+        """)
         temp_header.addWidget(temp_label)
         temp_header.addStretch()
         temp_header.addWidget(self.temp_value_label)
@@ -91,58 +153,259 @@ class GLMChatWindow(QWidget):
         self.temp_slider.setRange(0, 100)
         self.temp_slider.setValue(40)
         self.temp_slider.setStyleSheet("""
-            QSlider::handle:horizontal { background: #5555ff; width: 18px; border-radius: 9px; }
-            QSlider::groove:horizontal { background: #333; height: 8px; border-radius: 4px; }
+            QSlider::groove:horizontal {
+                height: 20px;
+                background: #d4d0c8;
+                border: 2px inset #808080;
+                border-radius: 3px;
+            }
+            QSlider::handle:horizontal {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                           stop:0 #ffffff, stop:1 #e0e0e0);
+                border: 2px solid #808080;
+                width: 16px;
+                margin: -2px 0;
+                border-radius: 2px;
+            }
+            QSlider::handle:horizontal:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                           stop:0 #f0f0f0, stop:1 #d0d0d0);
+                border-color: #0056b3;
+            }
         """)
         self.temp_slider.valueChanged.connect(lambda v: self.temp_value_label.setText(f"{v/100:.1f}"))
         settings_layout.addWidget(self.temp_slider)
 
         # 3. System Prompt
         sys_label = QLabel("System Prompt")
-        sys_label.setStyleSheet("color: #ffffff; background-color: #bbbbff; color: #4444ff; padding: 2px 10px; border-radius: 4px; border: none;")
+        sys_label.setStyleSheet("""
+            QLabel {
+                color: #000080;
+                font-weight: bold;
+                font-size: 12px;
+                background-color: #d4d0c8;
+                padding: 2px 8px;
+                border: 1px solid #808080;
+                border-radius: 3px;
+            }
+        """)
         settings_layout.addWidget(sys_label)
         
         self.sys_prompt_input = QTextEdit()
         self.sys_prompt_input.setPlaceholderText("Enter system instructions here...")
         self.sys_prompt_input.setFixedHeight(80)
-        self.sys_prompt_input.setStyleSheet("background-color: #121212; border: 1px solid #333; color: #ccc; border-radius: 5px;")
+        self.sys_prompt_input.setStyleSheet("""
+            QTextEdit {
+                background-color: #ffffff;
+                border: 2px inset #808080;
+                color: #000000;
+                font-family: 'Tahoma', 'Segoe UI', sans-serif;
+                font-size: 11px;
+                border-radius: 2px;
+            }
+            QTextEdit:focus {
+                border-color: #0056b3;
+            }
+        """)
         settings_layout.addWidget(self.sys_prompt_input)
 
         layout.addWidget(settings_group)
 
+        # Индикатор прогресса (изначально скрыт)
+        self.progress_widget = QWidget()
+        self.progress_widget.setVisible(False)
+        progress_layout = QVBoxLayout(self.progress_widget)
+        progress_layout.setContentsMargins(5, 5, 5, 5)
+        
+        progress_label = QLabel("Processing request...")
+        progress_label.setStyleSheet("""
+            QLabel {
+                color: #000080;
+                font-weight: bold;
+                font-size: 11px;
+                background-color: #d4d0c8;
+                padding: 2px 8px;
+                border: 1px solid #808080;
+                border-radius: 3px;
+            }
+        """)
+        
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 0)  # Бесконечный прогресс
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                text-align: center;
+                color: #000000;
+                background-color: #d4d0c8;
+                border: 2px inset #808080;
+                border-radius: 2px;
+                height: 20px;
+                font-size: 10px;
+            }
+            QProgressBar::chunk {
+                background-color: #0056b3;
+                border-radius: 2px;
+                width: 10px;
+                margin: 1px;
+            }
+        """)
+        
+        progress_layout.addWidget(progress_label)
+        progress_layout.addWidget(self.progress_bar)
+        layout.addWidget(self.progress_widget)
+
         # Область чата
         self.chat_display = QTextEdit()
         self.chat_display.setReadOnly(True)
-        self.chat_display.setStyleSheet("background-color: #1e1e1e; border: 1px solid #333; color: #d4d4d4; font-size: 14px; border-radius: 8px;")
+        self.chat_display.setStyleSheet("""
+            QTextEdit {
+                background-color: #ffffff;
+                border: 2px inset #808080;
+                color: #000000;
+                font-family: 'Tahoma', 'Segoe UI', sans-serif;
+                font-size: 11px;
+                border-radius: 2px;
+            }
+        """)
         layout.addWidget(self.chat_display)
 
         # Поле ввода и кнопки
         bottom_layout = QHBoxLayout()
+        bottom_layout.setSpacing(5)
+        
         self.input_field = QLineEdit()
         self.input_field.setPlaceholderText("Type your message here...")
         self.input_field.returnPressed.connect(self.send_message)
-        self.input_field.setStyleSheet("background-color: #2d2d2d; color: white; padding: 10px; border-radius: 5px;")
+        self.input_field.setStyleSheet("""
+            QLineEdit {
+                background-color: #ffffff;
+                border: 2px inset #808080;
+                color: #000000;
+                padding: 5px;
+                font-family: 'Tahoma', 'Segoe UI', sans-serif;
+                font-size: 11px;
+                border-radius: 2px;
+            }
+            QLineEdit:focus {
+                border-color: #0056b3;
+            }
+        """)
         
         self.btn_send = QPushButton("Send")
         self.btn_send.clicked.connect(self.send_message)
-        self.btn_send.setStyleSheet("background-color: #0078d4; color: white; padding: 10px 25px; border-radius: 5px; font-weight: bold;")
+        self.btn_send.setStyleSheet("""
+            QPushButton {
+                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                                   stop:0 #ffffff, stop:1 #d4d0c8);
+                color: #000000;
+                border: 2px solid #808080;
+                padding: 6px 16px;
+                font-weight: bold;
+                font-size: 11px;
+                border-radius: 3px;
+                min-width: 60px;
+            }
+            QPushButton:hover {
+                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                                   stop:0 #f0f8ff, stop:1 #b0d0ff);
+                border-color: #0056b3;
+            }
+            QPushButton:pressed {
+                background-color: #d4d0c8;
+                border-style: inset;
+            }
+            QPushButton:disabled {
+                background-color: #d4d0c8;
+                color: #808080;
+                border-color: #a0a0a0;
+            }
+        """)
         
         self.btn_reset = QPushButton("Reset")
         self.btn_reset.clicked.connect(self.reset_chat)
-        self.btn_reset.setStyleSheet("background-color: #441111; color: white; padding: 10px 15px; border-radius: 5px;")
+        self.btn_reset.setStyleSheet("""
+            QPushButton {
+                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                                   stop:0 #ffffff, stop:1 #d4d0c8);
+                color: #000000;
+                border: 2px solid #808080;
+                padding: 6px 12px;
+                font-size: 11px;
+                border-radius: 3px;
+            }
+            QPushButton:hover {
+                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                                   stop:0 #fff0f0, stop:1 #ffd0d0);
+                border-color: #800000;
+            }
+            QPushButton:pressed {
+                background-color: #d4d0c8;
+                border-style: inset;
+            }
+        """)
 
         btn_notes = QPushButton("📝 Notes")
         btn_notes.clicked.connect(self.open_notes)
-        btn_notes.setStyleSheet("background-color: #4b5563; color: white; padding: 10px 15px; border-radius: 5px;")
+        btn_notes.setStyleSheet("""
+            QPushButton {
+                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                                   stop:0 #ffffff, stop:1 #d4d0c8);
+                color: #000000;
+                border: 2px solid #808080;
+                padding: 6px 12px;
+                font-size: 11px;
+                border-radius: 3px;
+            }
+            QPushButton:hover {
+                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                                   stop:0 #f0fff0, stop:1 #d0ffd0);
+                border-color: #008000;
+            }
+            QPushButton:pressed {
+                background-color: #d4d0c8;
+                border-style: inset;
+            }
+        """)
 
-        bottom_layout.addWidget(self.input_field)
+        btn_web = QPushButton("🌐 Web Version")
+        btn_web.clicked.connect(self.open_web_version)
+        btn_web.setStyleSheet("""
+            QPushButton {
+                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                                   stop:0 #ffffff, stop:1 #d4d0c8);
+                color: #000000;
+                border: 2px solid #808080;
+                padding: 6px 12px;
+                font-size: 11px;
+                border-radius: 3px;
+            }
+            QPushButton:hover {
+                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                                   stop:0 #f0f0ff, stop:1 #d0d0ff);
+                border-color: #000080;
+            }
+            QPushButton:pressed {
+                background-color: #d4d0c8;
+                border-style: inset;
+            }
+        """)
+
+        bottom_layout.addWidget(self.input_field, 1)
         bottom_layout.addWidget(self.btn_send)
         bottom_layout.addWidget(self.btn_reset)
         bottom_layout.addWidget(btn_notes)
+        bottom_layout.addWidget(btn_web)
         layout.addLayout(bottom_layout)
 
         self.setLayout(layout)
-        self.setStyleSheet("background-color: #121212; color: #ffffff;")
+        self.setStyleSheet("""
+            QWidget {
+                background-color: #ece9d8;
+                color: #000000;
+                font-family: 'Tahoma', 'Segoe UI', sans-serif;
+                font-size: 11px;
+            }
+        """)
 
     def append_message(self, role, text):
         color = "#569cd6" if role == "User" else "#ce9178"
@@ -178,10 +441,27 @@ class GLMChatWindow(QWidget):
     def set_loading(self, is_loading):
         self.btn_send.setEnabled(not is_loading)
         self.input_field.setEnabled(not is_loading)
+        
+        # Показываем/скрываем индикатор прогресса
+        self.progress_widget.setVisible(is_loading)
+        
         if is_loading:
-            self.setWindowTitle("GLM-4.5 Air - Special Chat (Thinking...)")
+            self.setWindowTitle("GLM-4.5 Air - Special Chat (Processing...)")
+            # Анимация прогресса
+            self.progress_timer = QTimer()
+            self.progress_timer.timeout.connect(self.update_progress_animation)
+            self.progress_animation_step = 0
+            self.progress_timer.start(100)
         else:
             self.setWindowTitle("GLM-4.5 Air - Special Chat")
+            if hasattr(self, 'progress_timer'):
+                self.progress_timer.stop()
+    
+    def update_progress_animation(self):
+        """Анимация индикатора прогресса"""
+        self.progress_animation_step = (self.progress_animation_step + 1) % 4
+        dots = "." * self.progress_animation_step
+        self.progress_bar.setFormat(f"Processing{dots}")
 
     def reset_chat(self):
         self.chat_display.clear()
@@ -198,6 +478,16 @@ class GLMChatWindow(QWidget):
     def open_notes(self):
         notes = NotesManager(parent=self)
         notes.exec()
+
+    def open_web_version(self):
+        """Открыть веб-версию GLM-4.5 Space в браузере"""
+        web_url = "https://huggingface.co/spaces/zai-org/GLM-4.5-Space"
+        try:
+            webbrowser.open(web_url)
+            # Добавляем сообщение в чат об открытии
+            self.append_message("System", f"Opening web version in browser: {web_url}")
+        except Exception as e:
+            self.append_message("System Error", f"Failed to open browser: {str(e)}")
 
 if __name__ == "__main__":
     from PyQt6.QtWidgets import QApplication

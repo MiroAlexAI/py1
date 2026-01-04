@@ -2,6 +2,7 @@ import httpx
 import asyncio
 import logging
 import os
+import time
 from dotenv import load_dotenv
 import db
 
@@ -13,6 +14,7 @@ async def fetch_model_response(model_name, api_url, api_key_name, prompt, timeou
     Отправляет асинхронный запрос к API конкретной модели с учетом глобальных параметров.
     """
     load_dotenv()
+    start_time = time.time()
     
     # Логика выбора ключей (ротация)
     api_keys = []
@@ -32,7 +34,7 @@ async def fetch_model_response(model_name, api_url, api_key_name, prompt, timeou
         if k: api_keys.append(k)
 
     if not api_keys:
-        return {"model": model_name, "response": "API key not found", "status": "Error: Auth"}
+        return {"model": model_name, "response": "API key not found", "status": "Error: Auth", "resp_time": 0.0}
 
     last_error = ""
     for i, api_key in enumerate(api_keys):
@@ -67,13 +69,11 @@ async def fetch_model_response(model_name, api_url, api_key_name, prompt, timeou
                 data["thinking"] = {
                     "type": "enabled"
                 }
-        
-        # Поддержка thinking для других (OpenRouter/OpenAI-like если поддерживается)
-        # Примечание: не все API поддерживают thinking в таком формате, для z.ai он специфичен.
 
         try:
             async with httpx.AsyncClient(timeout=float(timeout)) as client:
                 response = await client.post(api_url, headers=headers, json=data)
+                elapsed = time.time() - start_time
                 
                 # Ротация при ошибках или лимитах (401, 429, 502, 503)
                 if response.status_code in [401, 429, 502, 503] and i < len(api_keys) - 1:
@@ -83,25 +83,25 @@ async def fetch_model_response(model_name, api_url, api_key_name, prompt, timeou
                 if response.status_code != 200:
                     error_text = response.text
                     logger.error(f"API Error {response.status_code} for {model_name}: {error_text}")
-                    logger.debug(f"Sent payload: {data}")
-                    return {"model": model_name, "response": f"Error {response.status_code}: {error_text}. Sent: {data['model']}", "status": "Error: API"}
+                    return {"model": model_name, "response": f"Error {response.status_code}", "status": "Error: API", "resp_time": elapsed}
 
                 result = response.json()
                 content = result.get('choices', [{}])[0].get('message', {}).get('content')
                 
                 if content:
-                    return {"model": model_name, "response": content, "status": "Success"}
+                    return {"model": model_name, "response": content, "status": "Success", "resp_time": elapsed}
                 else:
-                    return {"model": model_name, "response": "Empty answer from model", "status": "Error: Parse"}
+                    return {"model": model_name, "response": "Empty answer", "status": "Error: Parse", "resp_time": elapsed}
                     
         except Exception as e:
+            elapsed = time.time() - start_time
             last_error = str(e)
             if i < len(api_keys) - 1:
                 logger.error(f"Attempt {i+1} for {model_name} failed: {last_error}. Trying next key...")
                 continue
             break
 
-    return {"model": model_name, "response": last_error, "status": "Error"}
+    return {"model": model_name, "response": last_error, "status": "Error", "resp_time": elapsed}
 
 async def delayed_fetch(delay, model_name, api_url, api_key_name, prompt, timeout=60, **kwargs):
     """Вспомогательная функция для ступенчатого запуска запросов."""
