@@ -1,10 +1,11 @@
 import sys
 import os
 import webbrowser
+import markdown2
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QTextEdit, QLineEdit, 
                               QPushButton, QHBoxLayout, QCheckBox, QLabel, QScrollArea, QSlider, 
-                              QProgressBar, QApplication)
-from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer
+                              QProgressBar, QApplication, QSplitter)
+from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer, QEvent
 from notes_manager import NotesManager
 from gradio_client import Client
 from dotenv import load_dotenv
@@ -254,6 +255,9 @@ class GLMChatWindow(QWidget):
         progress_layout.addWidget(self.progress_bar)
         layout.addWidget(self.progress_widget)
 
+        # --- Splitter Area (Chat History + Multi-line Input) ---
+        self.chat_splitter = QSplitter(Qt.Orientation.Vertical)
+        
         # Область чата
         self.chat_display = QTextEdit()
         self.chat_display.setReadOnly(True)
@@ -265,19 +269,32 @@ class GLMChatWindow(QWidget):
                 font-family: 'Tahoma', 'Segoe UI', sans-serif;
                 font-size: 11px;
                 border-radius: 2px;
+                padding: 10px;
             }
         """)
-        layout.addWidget(self.chat_display)
-
-        # Поле ввода и кнопки
-        bottom_layout = QHBoxLayout()
-        bottom_layout.setSpacing(5)
+        # Добавляем базовые стили для Markdown
+        self.chat_display.document().setDefaultStyleSheet("""
+            code { background-color: #f4f4f4; padding: 2px 4px; border-radius: 4px; font-family: Consolas, monospace; }
+            pre { background-color: #f8f8f8; padding: 10px; border-radius: 5px; border: 1px solid #ddd; }
+            table { border-collapse: collapse; width: 100%; margin-bottom: 1em; }
+            th, td { border: 1px solid #ddd; padding: 5px; text-align: left; }
+            th { background-color: #f2f2f2; }
+            blockquote { border-left: 5px solid #ccc; margin: 10px; padding: 5px 10px; color: #666; font-style: italic; }
+        """)
         
-        self.input_field = QLineEdit()
-        self.input_field.setPlaceholderText("Type your message here...")
-        self.input_field.returnPressed.connect(self.send_message)
+        self.chat_splitter.addWidget(self.chat_display)
+
+        # Контейнер для ввода
+        input_container = QWidget()
+        input_container_layout = QVBoxLayout(input_container)
+        input_container_layout.setContentsMargins(0, 0, 0, 0)
+        input_container_layout.setSpacing(5)
+
+        self.input_field = QTextEdit()
+        self.input_field.setPlaceholderText("Type your message here... (Ctrl+Enter to send)")
+        self.input_field.installEventFilter(self) # Для перехвата Ctrl+Enter
         self.input_field.setStyleSheet("""
-            QLineEdit {
+            QTextEdit {
                 background-color: #ffffff;
                 border: 2px inset #808080;
                 color: #000000;
@@ -286,10 +303,15 @@ class GLMChatWindow(QWidget):
                 font-size: 11px;
                 border-radius: 2px;
             }
-            QLineEdit:focus {
+            QTextEdit:focus {
                 border-color: #0056b3;
             }
         """)
+        input_container_layout.addWidget(self.input_field)
+        
+        # Поле кнопок
+        bottom_buttons_layout = QHBoxLayout()
+        bottom_buttons_layout.setSpacing(5)
         
         self.btn_send = QPushButton("Send")
         self.btn_send.clicked.connect(self.send_message)
@@ -367,7 +389,7 @@ class GLMChatWindow(QWidget):
             }
         """)
 
-        btn_web = QPushButton("🌐 Web Version")
+        btn_web = QPushButton("🌐 Web")
         btn_web.clicked.connect(self.open_web_version)
         btn_web.setStyleSheet("""
             QPushButton {
@@ -390,12 +412,21 @@ class GLMChatWindow(QWidget):
             }
         """)
 
-        bottom_layout.addWidget(self.input_field, 1)
-        bottom_layout.addWidget(self.btn_send)
-        bottom_layout.addWidget(self.btn_reset)
-        bottom_layout.addWidget(btn_notes)
-        bottom_layout.addWidget(btn_web)
-        layout.addLayout(bottom_layout)
+        bottom_buttons_layout.addStretch()
+        bottom_buttons_layout.addWidget(self.btn_send)
+        bottom_buttons_layout.addWidget(self.btn_reset)
+        bottom_buttons_layout.addWidget(btn_notes)
+        bottom_buttons_layout.addWidget(btn_web)
+        
+        input_container_layout.addLayout(bottom_buttons_layout)
+        
+        self.chat_splitter.addWidget(input_container)
+        
+        # Начальные размеры: 75% под чат, 25% под ввод
+        self.chat_splitter.setStretchFactor(0, 3)
+        self.chat_splitter.setStretchFactor(1, 1)
+        
+        layout.addWidget(self.chat_splitter)
 
         self.setLayout(layout)
         self.setStyleSheet("""
@@ -407,12 +438,37 @@ class GLMChatWindow(QWidget):
             }
         """)
 
+    def eventFilter(self, obj, event):
+        """Перехват Ctrl+Enter для отправки сообщения из QTextEdit."""
+        if obj is self.input_field and event.type() == QEvent.Type.KeyPress:
+            if event.key() == Qt.Key.Key_Return and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+                self.send_message()
+                return True
+        return super().eventFilter(obj, event)
+
     def append_message(self, role, text):
-        color = "#569cd6" if role == "User" else "#ce9178"
-        self.chat_display.append(f"<b style='color: {color};'>{role}:</b> {text}<br>")
+        user_color = "#0000ff" # Синий для пользователя
+        bot_color = "#006400"  # Темно-зеленый для бота
+        role_color = user_color if role == "User" else bot_color
+        
+        if role == "GLM-4.5":
+            try:
+                # Рендерим Markdown в HTML
+                html_body = markdown2.markdown(text, extras=["fenced-code-blocks", "tables", "break-on-newline", "blockquote"])
+                msg_html = f"<div style='margin-bottom: 12px; border-bottom: 1px dotted #ccc; padding-bottom: 5px;'>" \
+                           f"<b style='color: {role_color};'>{role}:</b><br>{html_body}</div>"
+                self.chat_display.append(msg_html)
+            except Exception as e:
+                self.chat_display.append(f"<b style='color: {role_color};'>{role}:</b> {text}<br>")
+        else:
+            # Для пользователя или системы просто сохраняем переносы
+            safe_text = text.replace('\n', '<br>').replace(' ', '&nbsp;')
+            msg_html = f"<div style='margin-bottom: 10px; border-bottom: 1px solid #ddd; padding-bottom: 3px;'>" \
+                       f"<b style='color: {role_color};'>{role}:</b><br>{safe_text}</div>"
+            self.chat_display.append(msg_html)
 
     def send_message(self):
-        text = self.input_field.text().strip()
+        text = self.input_field.toPlainText().strip()
         if not text:
             return
 
